@@ -1186,6 +1186,14 @@ static const char simh_help[] =
 #define HLP_CP          "*Commands Copying_Files CP"
       "3CP\n"
       "++CP sfile dfile            copies a file\n"
+      "2Creating Directories\n"
+#define HLP_MKDIR       "*Commands Creating_Directories MKDIR"
+      "3MKDIR\n"
+      "++MKDIR path                creates a directory\n"
+      "2Deleting Directories\n"
+#define HLP_RMDIR       "*Commands Deleting_Directories RMDIR"
+      "3RMDIR\n"
+      "++RMDIR path                deleting a directory\n"
 #define HLP_SET         "*Commands SET"
       "2SET\n"
        /***************** 80 character line width template *************************/
@@ -1643,6 +1651,8 @@ static const char simh_help[] =
       "++%%~pI%%    - expands the value of %%I%% to a path only\n"
       "++%%~nI%%    - expands the value of %%I%% to a file name only\n"
       "++%%~xI%%    - expands the value of %%I%% to a file extension only\n\n"
+      "++%%~tI%%    - expands the value of %%I%% to date/time of file\n\n"
+      "++%%~zI%%    - expands the value of %%I%% to size of file\n\n"
       " The modifiers can be combined to get compound results:\n\n"
       "++%%~pnI%%   - expands the value of %%I%% to a path and name only\n"
       "++%%~nxI%%   - expands the value of %%I%% to a file name and extension only\n\n"
@@ -2334,6 +2344,8 @@ static CTAB cmd_table[] = {
     { "RM",         &delete_cmd,    0,          HLP_RM,         NULL, NULL },
     { "COPY",       &copy_cmd,      0,          HLP_COPY,       NULL, NULL },
     { "CP",         &copy_cmd,      0,          HLP_CP,         NULL, NULL },
+    { "MKDIR",      &mkdir_cmd,     0,          HLP_MKDIR,      NULL, NULL },
+    { "RMDIR",      &rmdir_cmd,     0,          HLP_RMDIR,      NULL, NULL },
     { "SET",        &set_cmd,       0,          HLP_SET,        NULL, NULL },
     { "SHOW",       &show_cmd,      0,          HLP_SHOW,       NULL, NULL },
     { "DO",         &do_cmd,        1,          HLP_DO,         NULL, NULL },
@@ -2619,6 +2631,10 @@ if (*argv[0]) {                                         /* sim name arg? */
     setenv ("SIM_BIN_PATH", argv[0], 1);
     }
 sim_argv = argv;
+
+if (sim_switches & SWMASK ('T'))                       /* Command Line -T switch */
+    stat = sim_library_unit_tests ();                   /* run library unit tests */
+
 cptr = getenv("HOME");
 if (cptr == NULL) {
     cptr = getenv("HOMEPATH");
@@ -2656,9 +2672,6 @@ else if (*argv[0]) {                                    /* sim name arg? */
     }
 if (SCPE_BARE_STATUS(stat) == SCPE_OPENERR)             /* didn't exist/can't open? */
     stat = SCPE_OK;
-
-if (sim_switches & SWMASK ('T'))                       /* Command Line -T switch */
-    stat = sim_library_unit_tests ();                   /* run library unit tests */
 
 if (SCPE_BARE_STATUS(stat) != SCPE_EXIT)
     process_stdin_commands (SCPE_BARE_STATUS(stat), argv);
@@ -2852,7 +2865,8 @@ fprintf (st, "   HELP dev SET\n");
 fprintf (st, "   HELP dev SHOW\n");
 fprintf (st, "   HELP dev REGISTERS\n\n");
 fprintf (st, "Help is available for the following commands:\n\n    ");
-qsort (hlp_cmdp, cmd_cnt, sizeof(*hlp_cmdp), _cmd_name_compare);
+if (hlp_cmdp)
+    qsort (hlp_cmdp, cmd_cnt, sizeof(*hlp_cmdp), _cmd_name_compare);
 line_offset = 4;
 for (i=0; i<cmd_cnt; ++i) {
     fputs (hlp_cmdp[i]->name, st);
@@ -2984,13 +2998,18 @@ DEBTAB *dep;
 t_bool found = FALSE;
 t_bool deb_desc_available = FALSE;
 char buf[CBUFSIZE], header[CBUFSIZE];
+uint32 enabled_units = dptr->numunits;
+uint32 unit;
 
 sprintf (header, "\n%s device SET commands:\n\n", dptr->name);
+for (unit=0; unit < dptr->numunits; unit++)
+    if (dptr->units[unit].flags & UNIT_DIS)
+        --enabled_units;
 if (dptr->modifiers) {
     for (mptr = dptr->modifiers; mptr->mask != 0; mptr++) {
         if (!MODMASK(mptr,MTAB_VDV) && MODMASK(mptr,MTAB_VUN) && (dptr->numunits != 1))
             continue;                                       /* skip unit only extended modifiers */
-        if ((dptr->numunits != 1) && !(mptr->mask & MTAB_XTD))
+        if ((enabled_units != 1) && !(mptr->mask & MTAB_XTD))
             continue;                                       /* skip unit only simple modifiers */
         if (mptr->mstring) {
             fprint_header (st, &found, header);
@@ -3031,7 +3050,7 @@ if ((dptr->flags & DEV_DEBUG) || (dptr->debflags)) {
         fprintf (st,  "%-30s\tDisables specific debugging for device %s\n", buf, sim_dname (dptr));
         }
     }
-if ((dptr->modifiers) && (dptr->units) && (dptr->numunits != 1)) {
+if ((dptr->modifiers) && (dptr->units) && (enabled_units != 1)) {
     if (dptr->units->flags & UNIT_DISABLE) {
         fprint_header (st, &found, header);
         sprintf (buf, "set %sn ENABLE", sim_dname (dptr));
@@ -3093,18 +3112,23 @@ void fprint_show_help_ex (FILE *st, DEVICE *dptr, t_bool silent)
 MTAB *mptr;
 t_bool found = FALSE;
 char buf[CBUFSIZE], header[CBUFSIZE];
+uint32 enabled_units = dptr->numunits;
+uint32 unit;
 
 sprintf (header, "\n%s device SHOW commands:\n\n", dptr->name);
+for (unit=0; unit < dptr->numunits; unit++)
+    if (dptr->units[unit].flags & UNIT_DIS)
+        --enabled_units;
 if (dptr->modifiers) {
     for (mptr = dptr->modifiers; mptr->mask != 0; mptr++) {
         if (!MODMASK(mptr,MTAB_VDV) && MODMASK(mptr,MTAB_VUN) && (dptr->numunits != 1))
             continue;                                       /* skip unit only extended modifiers */
-        if ((dptr->numunits != 1) && !(mptr->mask & MTAB_XTD))
+        if ((enabled_units != 1) && !(mptr->mask & MTAB_XTD))
             continue;                                       /* skip unit only simple modifiers */
         if ((!mptr->disp) || (!mptr->pstring) || !(*mptr->pstring))
             continue;
         fprint_header (st, &found, header);
-        sprintf (buf, "show %s %s%s", sim_dname (dptr), mptr->pstring, MODMASK(mptr,MTAB_SHP) ? "=arg" : "");
+        sprintf (buf, "show %s %s%s", sim_dname (dptr), mptr->pstring, MODMASK(mptr,MTAB_SHP) ? "{=arg}" : "");
         fprintf (st, "%-30s\t%s\n", buf, mptr->help ? mptr->help : "");
         }
     }
@@ -3113,7 +3137,7 @@ if ((dptr->flags & DEV_DEBUG) || (dptr->debflags)) {
     sprintf (buf, "show %s DEBUG", sim_dname (dptr));
     fprintf (st, "%-30s\tDisplays debugging status for device %s\n", buf, sim_dname (dptr));
     }
-if ((dptr->modifiers) && (dptr->units) && (dptr->numunits != 1)) {
+if ((dptr->modifiers) && (dptr->units) && (enabled_units != 1)) {
     for (mptr = dptr->modifiers; mptr->mask != 0; mptr++) {
         if ((!MODMASK(mptr,MTAB_VUN)) && MODMASK(mptr,MTAB_XTD))
             continue;                                           /* skip device only modifiers */
@@ -3360,9 +3384,12 @@ if (*cptr) {
                     sim_printf ("No help available for the %s command\n", cmdp->name);
                 }
             }
+        else {
+            sim_printf ("No such command or device %s\n", gbuf);
+            }
         }
     else {
-        if (dptr->flags & DEV_DISABLE)
+        if (dptr->flags & DEV_DIS)
             sim_printf ("Device %s is currently disabled\n", dptr->name);
         r = help_dev_help (stdout, dptr, uptr, flag, cptr);
         if (sim_log)
@@ -3499,7 +3526,7 @@ static char *do_position(void)
 {
 static char cbuf[CBUFSIZE];
 
-sprintf (cbuf, "%s%s%s-%d", sim_do_filename[sim_do_depth], sim_do_label[sim_do_depth] ? "::" : "", sim_do_label[sim_do_depth] ? sim_do_label[sim_do_depth] : "", sim_goto_line[sim_do_depth]);
+snprintf (cbuf, sizeof (cbuf), "%s%s%s-%d", sim_do_filename[sim_do_depth], sim_do_label[sim_do_depth] ? "::" : "", sim_do_label[sim_do_depth] ? sim_do_label[sim_do_depth] : "", sim_goto_line[sim_do_depth]);
 return cbuf;
 }
 
@@ -4189,7 +4216,7 @@ for (; *ip && (op < oend); ) {
             if (*ip == '~') {
                 expand_it = TRUE;
                 ++ip;
-                for (i=0; (i < (sizeof (parts) - 1)) && (strchr ("fpnx", *ip)); i++, ip++) {
+                for (i=0; (i < (sizeof (parts) - 1)) && (strchr ("fpnxtz", *ip)); i++, ip++) {
                     parts[i] = *ip;
                     parts[i + 1] = '\0';
                     }
@@ -4941,7 +4968,7 @@ const char *cptr;
 if (NULL == sim_gotofile) return SCPE_UNK;              /* only valid inside of do_cmd */
 cptr = get_glyph (fcptr, gbuf, 0);
 if ('\0' == gbuf[0]) return SCPE_ARG;                   /* unspecified goto target */
-sprintf(cbuf, "%s %s", sim_do_filename[sim_do_depth], cptr);
+snprintf(cbuf, sizeof (cbuf), "%s %s", sim_do_filename[sim_do_depth], cptr);
 sim_switches |= SWMASK ('O');                           /* inherit ON state and actions */
 return do_cmd_label (flag, cbuf, gbuf);
 }
@@ -5289,11 +5316,6 @@ while (*cptr != 0) {                                    /* do all mods */
                     }
                 else if (!mptr->desc)                   /* value desc? */
                     break;
-//                else if (mptr->mask & MTAB_VAL) {     /* take a value? */
-//                    if (!cvptr) return SCPE_MISVAL;   /* none? error */
-//                    r = dep_reg (0, cvptr, (REG *) mptr->desc, 0);
-//                    if (r != SCPE_OK) return r;
-//                    }
                 else if (cvptr)                         /* = value? */
                     return SCPE_ARG;
                 else *((int32 *) mptr->desc) = mptr->match;
@@ -5508,9 +5530,9 @@ if ((dptr = find_dev (gbuf))) {                         /* device match? */
     }
 else if ((dptr = find_unit (gbuf, &uptr))) {            /* unit match? */
     if (uptr == NULL)                                   /* invalid unit */
-        return SCPE_NXUN;
+        return sim_messagef (SCPE_NXUN, "Non-existent unit: %s\n", gbuf);
     if (uptr->flags & UNIT_DIS)                         /* disabled? */
-        return SCPE_UDIS;
+        return sim_messagef (SCPE_UDIS, "Unit disabled: %s\n", gbuf);
     shtb = show_unit_tab;                               /* global table */
     lvl = MTAB_VUN;                                     /* unit match */
     GET_SWITCHES (cptr);                                /* get more switches */
@@ -5523,7 +5545,7 @@ else {
     if (sim_dflt_dev->modifiers) {
         if ((cvptr = strchr (gbuf, '=')))               /* = value? */
             *cvptr++ = 0;
-        for (mptr = sim_dflt_dev->modifiers; mptr->mask != 0; mptr++) {
+        for (mptr = sim_dflt_dev->modifiers; mptr && (mptr->mask != 0); mptr++) {
             if ((((mptr->mask & MTAB_VDV) == MTAB_VDV) &&
                  (mptr->pstring && (MATCH_CMD (gbuf, mptr->pstring) == 0))) ||
                 (!(mptr->mask & MTAB_VDV) && (mptr->mstring && (MATCH_CMD (gbuf, mptr->mstring) == 0)))) {
@@ -5540,7 +5562,7 @@ else {
         if ((shptr = find_shtab (show_dev_tab, gbuf)))  /* global match? */
             return shptr->action (ofile, sim_dflt_dev, uptr, shptr->arg, cptr);
         else
-            return SCPE_NXDEV;                          /* no match */
+            return sim_messagef (SCPE_NXDEV, "Non-existent device: %s\n", gbuf);/* no match */
         }
     }
 
@@ -5560,13 +5582,9 @@ while (*cptr != 0) {                                    /* do all mods */
             ((mptr->mask & lvl) == lvl): (MTAB_VUN & lvl)) &&
             ((mptr->disp && mptr->pstring &&            /* named disp? */
             (MATCH_CMD (gbuf, mptr->pstring) == 0))
- //           ||
- //           ((mptr->mask & MTAB_VAL) &&                 /* named value? */
- //           mptr->mstring &&
- //           (MATCH_CMD (gbuf, mptr->mstring) == 0)))
             )) {
-            if (cvptr && !(mptr->mask & MTAB_SHP))
-                return SCPE_ARG;
+            if (cvptr && !MODMASK(mptr,MTAB_SHP))
+                return sim_messagef (SCPE_ARG, "Invalid Argument: %s=%s\n", gbuf, cvptr);
             show_one_mod (ofile, dptr, uptr, mptr, cvptr, 1);
             break;
             }                                           /* end if */
@@ -5579,10 +5597,12 @@ while (*cptr != 0) {                                    /* do all mods */
             if (r != SCPE_OK)
                 return r;
             }
-        else if (!dptr->modifiers)                      /* no modifiers? */
-            return SCPE_NOPARAM;
-        else
-            return SCPE_NXPAR;
+        else {
+            if (!dptr->modifiers)                       /* no modifiers? */
+                return sim_messagef (SCPE_NOPARAM, "%s device has no parameters\n", dptr->name);
+            else
+                return sim_messagef (SCPE_NXPAR, "Non-existent parameter: %s\n", gbuf);
+            }
         }                                               /* end if */
     }                                                   /* end while */
 return SCPE_OK;
@@ -5694,9 +5714,10 @@ return SCPE_OK;
 
 const char *sprint_capac (DEVICE *dptr, UNIT *uptr)
 {
-static char capac_buf[((CHAR_BIT * sizeof (t_value) * 4 + 3)/3) + 8];
+static char capac_buf[((CHAR_BIT * sizeof (t_value) * 4 + 3)/3) + 12];
 t_addr kval = (uptr->flags & UNIT_BINK)? 1024: 1000;
 t_addr mval;
+double remfrac;
 t_addr psize = uptr->capac;
 const char *scale, *width;
 
@@ -5711,18 +5732,28 @@ else
     width = "B";
 if ((psize < (kval * 10)) &&
     (0 != (psize % kval))) {
+    remfrac = 0.0;
     scale = "";
     }
 else if ((psize < (mval * 10)) &&
          (0 != (psize % mval))){
     scale = "K";
+    remfrac = ((double)(psize % kval))/kval;
     psize = psize / kval;
     }
 else {
     scale = "M";
+    remfrac = ((double)(psize % mval))/mval;
     psize = psize / mval;
     }
 sprint_val (capac_buf, (t_value) psize, 10, T_ADDR_W, PV_LEFT);
+if ((remfrac != 0.0) && (sim_switches & SWMASK ('R'))) {
+    char *plast_char = &capac_buf[strlen (capac_buf) - 1];
+    char save_char = *plast_char;
+
+    sprintf (plast_char, "%0.3f", remfrac);
+    *plast_char = save_char;
+    }
 sprintf (&capac_buf[strlen (capac_buf)], "%s%s", scale, width);
 return capac_buf;
 }
@@ -5854,6 +5885,9 @@ if (flag) {
     fprintf (st, "\n        No RegEx support for EXPECT commands");
 #endif
     fprintf (st, "\n        OS clock resolution: %dms", os_tick_size);
+    fprintf (st, "\n        Time taken by msleep(1): %dms", os_ms_sleep_1);
+    if (eth_version ())
+        fprintf (st, "\n        Ethernet packet info: %s", eth_version());
     fprintf (st, "\n        Time taken by msleep(1): %dms", os_ms_sleep_1);
 #if defined(__VMS)
     if (1) {
@@ -6231,18 +6265,11 @@ t_stat show_one_mod (FILE *st, DEVICE *dptr, UNIT *uptr, MTAB *mptr,
     CONST char *cptr, int32 flag)
 {
 t_stat r = SCPE_OK;
-//t_value val;
 
 if (mptr->disp)
     r = mptr->disp (st, uptr, mptr->match, (CONST void *)(cptr? cptr: mptr->desc));
-//else if ((mptr->mask & MTAB_XTD) && (mptr->mask & MTAB_VAL)) {
-//    REG *rptr = (REG *) mptr->desc;
-//    fprintf (st, "%s=", mptr->pstring);
-//    val = get_rval (rptr, 0);
-//    fprint_val (st, val, rptr->radix, rptr->width,
-//        rptr->flags & REG_FMT);
-//    }
-else fputs (mptr->pstring, st);
+else
+    fputs (mptr->pstring, st);
 if ((r == SCPE_OK) && (flag && !((mptr->mask & MTAB_XTD) && MODMASK(mptr,MTAB_NMO))))
     fputc ('\n', st);
 return r;
@@ -6545,6 +6572,59 @@ stat = sim_dir_scan (sname, sim_copy_entry, &copy_state);
 if ((stat == SCPE_OK) && (copy_state.count))
     return sim_messagef (SCPE_OK, "      %3d file(s) copied\n", copy_state.count);
 return copy_state.stat;
+}
+
+t_stat mkdir_cmd (int32 flg, CONST char *cptr)
+{
+char path[CBUFSIZE];
+char *c;
+struct stat filestat;
+
+if ((!cptr) || (*cptr == '\0'))
+    return sim_messagef (SCPE_2FARG, "Must specify a directory path\n");
+strlcpy (path, cptr, sizeof (path));
+while ((c = strchr (path, '\\')))
+    *c = '/';
+c = path;
+while ((c = strchr (c, '/'))) {
+    *c = '\0';
+    if (!stat (path, &filestat)) {
+        if (filestat.st_mode & S_IFDIR) {
+            *c = '/';   /* restore / */
+            ++c;
+            continue;
+            }
+        return sim_messagef (SCPE_ARG, "%s is not a directory\n", path);
+        }
+    if (
+#if defined(_WIN32)
+        mkdir (path)
+#else
+        mkdir (path, 0777)
+#endif
+                          )
+        return sim_messagef (SCPE_ARG, "Can't create directory: %s - %s\n", path, strerror (errno));
+    *c = '/';   /* restore / */
+    ++c;
+    }
+if (
+#if defined(_WIN32)
+    mkdir (path)
+#else
+    mkdir (path, 0777)
+#endif
+                      )
+    return sim_messagef (SCPE_ARG, "Can't create directory: %s - %s\n", path, strerror (errno));
+return SCPE_OK;
+}
+
+t_stat rmdir_cmd (int32 flg, CONST char *cptr)
+{
+if ((!cptr) || (*cptr == '\0'))
+    return sim_messagef (SCPE_2FARG, "Must specify a directory\n");
+if (rmdir (cptr))
+    return sim_messagef (SCPE_ARG, "Can't remove directory: %s - %s\n", cptr, strerror (errno));
+return SCPE_OK;
 }
 
 /* Debug command */
@@ -6942,7 +7022,7 @@ else {
         uptr->fileref = sim_fopen (cptr, "wb+");        /* open new file */
         if (uptr->fileref == NULL)                      /* open fail? */
             return attach_err (uptr, SCPE_OPENERR);     /* yes, error */
-        sim_messagef (SCPE_OK, "%s: creating new file\n", sim_dname (dptr));
+        sim_messagef (SCPE_OK, "%s: creating new file: %s\n", sim_dname (dptr), cptr);
         }
     else {                                              /* normal */
         uptr->fileref = sim_fopen (cptr, "rb+");        /* open r/w */
@@ -12821,6 +12901,14 @@ if (sim_deb && dptr && ((dptr->dctrl | (uptr ? uptr->dctrl : 0)) & dbits)) {
                 }
             j = i + 1;
             }
+        else {
+            if (buf[i] == 0) {      /* Imbedded \0 character in formatted result? */
+                fprintf (stderr, "sim_debug() formatted result: '%s'\r\n"
+                                 "            has an imbedded \\0 character.\r\n"
+                                 "DON'T DO THAT!\r\n", buf);
+                abort();
+                }
+            }
         }
     if (i > j) {
         if (!debug_unterm)                          /* print prefix when required */
@@ -13504,7 +13592,7 @@ return SCPE_OK;
 #define HLP_MATCH_AMBIGUOUS (~0u)
 #define HLP_MATCH_WILDCARD  (~1U)
 #define HLP_MATCH_NONE      0
-static int matchHelpTopicName (TOPIC *topic, const char *token)
+static size_t matchHelpTopicName (TOPIC *topic, const char *token)
 {
 size_t i, match;
 char cbuf[CBUFSIZE], *cptr;

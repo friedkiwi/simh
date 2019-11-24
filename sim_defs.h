@@ -654,7 +654,7 @@ struct UNIT {
 #define UNIT_NO_FIO         0000004         /* fileref is NOT a FILE * */
 #define UNIT_DISK_CHK       0000010         /* disk data debug checking (sim_disk) */
 #define UNIT_TMR_UNIT       0000200         /* Unit registered as a calibrated timer */
-#define UNIT_TAPE_MRK       0000400         /* Tape Unit AWS Tapemark */
+#define UNIT_TAPE_MRK       0000400         /* Tape Unit Tapemark */
 #define UNIT_TAPE_PNU       0001000         /* Tape Unit Position Not Updated */
 #define UNIT_V_DF_TAPE      10              /* Bit offset for Tape Density reservation */
 #define UNIT_S_DF_TAPE      3               /* Bits Reserved for Tape Density */
@@ -749,8 +749,8 @@ struct MTAB {
     t_stat              (*disp)(FILE *st, UNIT *up, int32 v, CONST void *dp);
                                                         /* display routine */
     void                *desc;                          /* value descriptor */
-                                                        /* REG * if MTAB_VAL */
-                                                        /* int * if not */
+                                                        /* pointer to something needed by */
+                                                        /* the validation and/or display routines */
     const char          *help;                          /* help string */
     };
 
@@ -1174,14 +1174,11 @@ extern int32 sim_asynch_inst_latency;
 #define AIO_QUEUE_MODE "Lock free asynchronous event queue"
 #define AIO_INIT                                                  \
     do {                                                          \
-      int tmr;                                                    \
       sim_asynch_main_threadid = pthread_self();                  \
       /* Empty list/list end uses the point value (void *)1.      \
          This allows NULL in an entry's a_next pointer to         \
          indicate that the entry is not currently in any list */  \
       sim_asynch_queue = QUEUE_LIST_END;                          \
-      for (tmr=0; tmr<SIM_NTIMERS; tmr++)                         \
-          sim_clock_cosched_queue[tmr] = QUEUE_LIST_END;          \
       } while (0)
 #define AIO_CLEANUP                                               \
     do {                                                          \
@@ -1217,7 +1214,6 @@ extern int32 sim_asynch_inst_latency;
 #define AIO_QUEUE_MODE "Lock based asynchronous event queue"
 #define AIO_INIT                                                  \
     do {                                                          \
-      int tmr;                                                    \
       pthread_mutexattr_t attr;                                   \
                                                                   \
       pthread_mutexattr_init (&attr);                             \
@@ -1229,8 +1225,6 @@ extern int32 sim_asynch_inst_latency;
          This allows NULL in an entry's a_next pointer to         \
          indicate that the entry is not currently in any list */  \
       sim_asynch_queue = QUEUE_LIST_END;                          \
-      for (tmr=0; tmr<SIM_NTIMERS; tmr++)                         \
-          sim_clock_cosched_queue[tmr] = QUEUE_LIST_END;          \
       } while (0)
 #define AIO_CLEANUP                                               \
     do {                                                          \

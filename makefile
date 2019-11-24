@@ -107,6 +107,17 @@ ifneq (,$(findstring besm6,$(MAKECMDGOALS)))
   VIDEO_USEFUL = true
   BESM6_BUILD = true
 endif
+# building the KA10 needs video support
+ifneq (,$(or $(findstring pdp6,$(MAKECMDGOALS)),$(findstring pdp10-ka,$(MAKECMDGOALS)),$(findstring pdp10-ki,$(MAKECMDGOALS))))
+  VIDEO_USEFUL = true
+endif
+ifneq (,$(or $(findstring pdp10-ka,$(MAKECMDGOALS)),$(findstring pdp10-ki,$(MAKECMDGOALS))))
+  NETWORK_USEFUL = true
+endif
+# building the PDP-7 needs video support
+ifneq (,$(findstring pdp7,$(MAKECMDGOALS)))
+  VIDEO_USEFUL = true
+endif
 # building the pdp11, pdp10, or any vax simulator could use networking support
 ifneq (,$(or $(findstring pdp11,$(MAKECMDGOALS)),$(findstring pdp10,$(MAKECMDGOALS)),$(findstring vax,$(MAKECMDGOALS)),$(findstring 3b2,$(MAKECMDGOALS))$(findstring all,$(MAKECMDGOALS))))
   NETWORK_USEFUL = true
@@ -546,6 +557,13 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
       OS_CCDEFS += -DHAVE_LIBPNG
       OS_LDFLAGS += -lpng
       $(info using libpng: $(call find_lib,png) $(call find_include,png))
+      ifneq (,$(call find_include,zlib))
+        ifneq (,$(call find_lib,z))
+          OS_CCDEFS += -DHAVE_ZLIB
+          OS_LDFLAGS += -lz
+          $(info using zlib: $(call find_lib,z) $(call find_include,zlib))
+        endif
+      endif
     endif
   endif
   ifneq (,$(call find_include,glob))
@@ -581,6 +599,7 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
           VIDEO_FEATURES = - video capabilities provided by libSDL2 (Simple Directmedia Layer)
           DISPLAYL = ${DISPLAYD}/display.c $(DISPLAYD)/sim_ws.c
           DISPLAYVT = ${DISPLAYD}/vt11.c
+          DISPLAY340 = ${DISPLAYD}/type340.c
           DISPLAYNG = ${DISPLAYD}/ng.c
           DISPLAY_OPT += -DUSE_DISPLAY $(VIDEO_CCDEFS) $(VIDEO_LDFLAGS)
           $(info using libSDL2: $(call find_include,SDL2/SDL))
@@ -605,6 +624,7 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
             VIDEO_FEATURES = - video capabilities provided by libSDL (Simple Directmedia Layer)
             DISPLAYL = ${DISPLAYD}/display.c $(DISPLAYD)/sim_ws.c
             DISPLAYVT = ${DISPLAYD}/vt11.c
+            DISPLAY340 = ${DISPLAYD}/type340.c
             DISPLAYNG = ${DISPLAYD}/ng.c
             DISPLAY_OPT += -DUSE_DISPLAY $(VIDEO_CCDEFS) $(VIDEO_LDFLAGS)
             $(info using libSDL: $(call find_include,SDL/SDL))
@@ -625,21 +645,21 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
       ifeq (Darwin,$(OSTYPE))
         $(info *** Info *** Install the MacPorts libSDL2 package to provide this)
         $(info *** Info *** functionality for your OS X system:)
-        $(info *** Info ***       # port install libsdl2)
+        $(info *** Info ***       # port install libsdl2 libpng zlib)
         ifeq (/usr/local/bin/brew,$(shell which brew))
           $(info *** Info ***)
           $(info *** Info *** OR)
           $(info *** Info ***)
           $(info *** Info *** Install the HomeBrew libSDL2 package to provide this)
           $(info *** Info *** functionality for your OS X system:)
-          $(info *** Info ***       $$ brew install sdl2)
+          $(info *** Info ***       $$ brew install sdl2 libpng zlib)
         endif
       else
         ifneq (,$(and $(findstring Linux,$(OSTYPE)),$(call find_exe,apt-get)))
           $(info *** Info *** Install the development components of libSDL or libSDL2)
           $(info *** Info *** packaged for your operating system distribution for)
           $(info *** Info *** your Linux system:)
-          $(info *** Info ***        $$ sudo apt-get install libsdl2-dev)
+          $(info *** Info ***        $$ sudo apt-get install libsdl2-dev libpng-dev)
           $(info *** Info ***    or)
           $(info *** Info ***        $$ sudo apt-get install libsdl-dev)
         else
@@ -878,7 +898,7 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
     NETWORK_OPT = $(NETWORK_CCDEFS)
   endif
   ifneq (binexists,$(shell if $(TEST) -e BIN/buildtools; then echo binexists; fi))
-    MKDIRBIN = mkdir -p BIN/buildtools
+    MKDIRBIN = @mkdir -p BIN/buildtools
   endif
   ifeq (commit-id-exists,$(shell if $(TEST) -e .git-commit-id; then echo commit-id-exists; fi))
     GIT_COMMIT_ID=$(shell grep 'SIM_GIT_COMMIT_ID' .git-commit-id | awk '{ print $$2 }')
@@ -976,6 +996,8 @@ else
       VIDEO_FEATURES = - video capabilities provided by libSDL2 (Simple Directmedia Layer)
       DISPLAYL = ${DISPLAYD}/display.c $(DISPLAYD)/sim_ws.c
       DISPLAYVT = ${DISPLAYD}/vt11.c
+      DISPLAY340 = ${DISPLAYD}/type340.c
+      DISPLAYNG = ${DISPLAYD}/ng.c
       DISPLAY_OPT += -DUSE_DISPLAY $(VIDEO_CCDEFS) $(VIDEO_LDFLAGS)
     else
       $(info ***********************************************************************)
@@ -994,8 +1016,10 @@ else
   OS_CCDEFS += -fms-extensions $(PTHREADS_CCDEFS)
   OS_LDFLAGS += -lm -lwsock32 -lwinmm $(PTHREADS_LDFLAGS)
   EXE = .exe
-  ifneq (binexists,$(shell if exist BIN\buildtools echo binexists))
-    MKDIRBIN = if not exist BIN mkdir BIN\buildtools
+  ifneq (clean,$(MAKECMDGOALS))
+    ifneq (buildtoolsexists,$(shell if exist BIN\buildtools (echo buildtoolsexists) else (mkdir BIN\buildtools)))
+      MKDIRBIN=
+    endif
   endif
   ifneq ($(USE_NETWORK),)
     NETWORK_OPT += -DUSE_SHARED
@@ -1175,6 +1199,9 @@ ifneq (3,$(GCC_MAJOR_VERSION))
   ifneq (,$(findstring -Wunused-result,$(shell $(GCC_WARNINGS_CMD))))
     CFLAGS_O += -Wno-unused-result
   endif
+  ifneq (,$(findstring -Wformat-truncation,$(shell $(GCC_WARNINGS_CMD))))
+    CFLAGS_O += -Wno-format-truncation
+  endif
 endif
 ifneq (clean,$(MAKECMDGOALS))
   BUILD_FEATURES := $(BUILD_FEATURES). $(COMPILER_NAME)
@@ -1260,8 +1287,12 @@ PDP18B = ${PDP18BD}/pdp18b_dt.c ${PDP18BD}/pdp18b_drm.c ${PDP18BD}/pdp18b_cpu.c 
 	${PDP18BD}/pdp18b_rb.c ${PDP18BD}/pdp18b_tt1.c ${PDP18BD}/pdp18b_fpp.c \
 	${PDP18BD}/pdp18b_g2tty.c ${PDP18BD}/pdp18b_dr15.c
 
+ifneq (,$(DISPLAY_OPT))
+  PDP7_DISPLAY_OPT = -DDISPLAY_TYPE=DIS_TYPE30 -DPIX_SCALE=RES_HALF
+endif
+
 PDP4_OPT = -DPDP4 -I ${PDP18BD}
-PDP7_OPT = -DPDP7 -I ${PDP18BD}
+PDP7_OPT = -DPDP7 -I ${PDP18BD} $(DISPLAY_OPT) $(PDP7_DISPLAY_OPT)
 PDP9_OPT = -DPDP9 -I ${PDP18BD}
 PDP15_OPT = -DPDP15 -I ${PDP18BD}
 
@@ -1700,7 +1731,9 @@ ISYS8010 = ${ISYS8010C}/i8080.c ${ISYS8010D}/isys8010_sys.c \
 	${ISYS8010C}/ieprom.c ${ISYS8010C}/iram8.c \
 	${ISYS8010C}/multibus.c ${ISYS8010D}/isbc8010.c \
 	${ISYS8010C}/isbc064.c ${ISYS8010C}/isbc202.c \
-	${ISYS8010C}/isbc201.c ${ISYS8010C}/zx200a.c
+	${ISYS8010C}/isbc201.c ${ISYS8010C}/zx200a.c \
+	${ISYS8010C}/isbc206.c ${ISYS8010C}/isbc464.c \
+	${ISYS8010C}/isbc208.c
 ISYS8010_OPT = -I ${ISYS8010D}
 
 
@@ -1711,8 +1744,10 @@ ISYS8020 = ${ISYS8020C}/i8080.c ${ISYS8020D}/isys8020_sys.c \
 	${ISYS8020C}/ieprom.c ${ISYS8020C}/iram8.c \
 	${ISYS8020C}/multibus.c ${ISYS8020D}/isbc8020.c \
 	${ISYS8020C}/isbc064.c ${ISYS8020C}/i8259.c \
-	${ISYS8010C}/isbc202.c ${ISYS8010C}/isbc201.c \
-	${ISYS8010C}/zx200a.c
+	${ISYS8020C}/isbc202.c ${ISYS8020C}/isbc201.c \
+	${ISYS8020C}/isbc206.c ${ISYS8020C}/isbc464.c \
+	${ISYS8020C}/zx200a.c ${ISYS8020C}/i8253.c \
+	${ISYS8020C}/isbc208.c
 ISYS8020_OPT = -I ${ISYS8020D}
 
 
@@ -1724,8 +1759,9 @@ ISYS8024 = ${ISYS8024C}/i8080.c ${ISYS8024D}/isys8024_sys.c \
 	${ISYS8024C}/ieprom.c ${ISYS8024C}/iram8.c \
 	${ISYS8024C}/multibus.c ${ISYS8024D}/isbc8024.c \
 	${ISYS8024C}/isbc064.c ${ISYS8024C}/isbc208.c \
-	${ISYS8010C}/isbc202.c ${ISYS8010C}/isbc201.c \
-	${ISYS8010C}/zx200a.c
+	${ISYS8024C}/isbc202.c ${ISYS8024C}/isbc201.c \
+	${ISYS8024C}/isbc206.c ${ISYS8024C}/isbc464.c \
+	${ISYS8024C}/zx200a.c
 ISYS8024_OPT = -I ${ISYS8024D}
 
 
@@ -1736,9 +1772,39 @@ ISYS8030 = ${ISYS8030C}/i8080.c ${ISYS8030D}/isys8030_sys.c \
 	${ISYS8030C}/i8259.c ${ISYS8030C}/i8253.c \
 	${ISYS8030C}/ieprom.c ${ISYS8030C}/iram8.c \
 	${ISYS8030C}/multibus.c ${ISYS8030D}/isbc8030.c \
-	${ISYS8010C}/isbc202.c ${ISYS8010C}/isbc201.c \
-	${ISYS8030C}/isbc064.c ${ISYS8010C}/zx200a.c
+	${ISYS8030C}/isbc202.c ${ISYS8030C}/isbc201.c \
+	${ISYS8030C}/isbc206.c ${ISYS8030C}/isbc464.c \
+	${ISYS8030C}/isbc064.c ${ISYS8030C}/zx200a.c \
+	${ISYS8010C}/isbc208.c
 ISYS8030_OPT = -I ${ISYS8030D}
+
+
+IMDS-210D = Intel-Systems/imds-210
+IMDS-210C = Intel-Systems/common
+IMDS-210 = ${IMDS-210C}/i8080.c ${IMDS-210D}/imds-210_sys.c \
+	${IMDS-210C}/i8251.c ${IMDS-210C}/i8255.c \
+	${IMDS-210C}/i8259.c ${IMDS-210C}/i8253.c \
+	${IMDS-210C}/ieprom.c ${IMDS-210C}/iram8.c \
+	${IMDS-210C}/ipbmultibus.c ${IMDS-210C}/ipb.c \
+	${IMDS-210C}/ipc-cont.c ${IMDS-210C}/ioc-cont.c \
+	${IMDS-210C}/isbc202.c ${IMDS-210C}/isbc201.c \
+	${IMDS-210C}/isbc206.c ${IMDS-210C}/isbc464.c \
+	${IMDS-210C}/zx200a.c ${IMDS-210C}/isbc064.c
+IMDS-210_OPT = -I ${IMDS-210D}
+
+
+IMDS-220D = Intel-Systems/imds-220
+IMDS-220C = Intel-Systems/common
+IMDS-220 = ${IMDS-220C}/i8080.c ${IMDS-220D}/imds-220_sys.c \
+	${IMDS-220C}/i8251.c ${IMDS-220C}/i8255.c \
+	${IMDS-220C}/i8259.c ${IMDS-220C}/i8253.c \
+	${IMDS-220C}/ieprom.c ${IMDS-220C}/iram8.c \
+	${IMDS-220C}/ipbmultibus.c ${IMDS-220C}/ipb.c \
+	${IMDS-220C}/ipc-cont.c ${IMDS-220C}/ioc-cont.c \
+	${IMDS-220C}/isbc202.c ${IMDS-220C}/isbc201.c \
+	${IMDS-220C}/isbc206.c ${IMDS-220C}/isbc464.c \
+	${IMDS-220C}/zx200a.c ${IMDS-220C}/isbc064.c
+IMDS-220_OPT = -I ${IMDS-220D}
 
 
 IMDS-225D = Intel-Systems/imds-225
@@ -1747,11 +1813,52 @@ IMDS-225 = ${IMDS-225C}/i8080.c ${IMDS-225D}/imds-225_sys.c \
 	${IMDS-225C}/i8251.c ${IMDS-225C}/i8255.c \
 	${IMDS-225C}/i8259.c ${IMDS-225C}/i8253.c \
 	${IMDS-225C}/ieprom.c ${IMDS-225C}/iram8.c \
-	${IMDS-225C}/ipcmultibus.c ${IMDS-225D}/ipc.c \
+	${IMDS-225C}/ipcmultibus.c ${IMDS-225C}/ipc.c \
 	${IMDS-225C}/ipc-cont.c ${IMDS-225C}/ioc-cont.c \
 	${IMDS-225C}/isbc202.c ${IMDS-225C}/isbc201.c \
-	${IMDS-225C}/zx200a.c
+	${IMDS-225C}/zx200a.c ${IMDS-225C}/isbc464.c \
+	${IMDS-225C}/isbc206.c
 IMDS-225_OPT = -I ${IMDS-225D}
+
+
+IMDS-230D = Intel-Systems/imds-230
+IMDS-230C = Intel-Systems/common
+IMDS-230 = ${IMDS-230C}/i8080.c ${IMDS-230D}/imds-230_sys.c \
+	${IMDS-230C}/i8251.c ${IMDS-230C}/i8255.c \
+	${IMDS-230C}/i8259.c ${IMDS-230C}/i8253.c \
+	${IMDS-230C}/ieprom.c ${IMDS-230C}/iram8.c \
+	${IMDS-230C}/ipbmultibus.c ${IMDS-230C}/ipb.c \
+	${IMDS-230C}/ipc-cont.c ${IMDS-230C}/ioc-cont.c \
+	${IMDS-230C}/isbc202.c ${IMDS-230C}/isbc201.c \
+	${IMDS-230C}/isbc206.c ${IMDS-230C}/isbc464.c \
+	${IMDS-230C}/zx200a.c ${IMDS-230C}/isbc064.c
+IMDS-230_OPT = -I ${IMDS-230D}
+
+
+IMDS-800D = Intel-Systems/imds-800
+IMDS-800C = Intel-Systems/common
+IMDS-800 = ${IMDS-800C}/i8080.c ${IMDS-800D}/imds-800_sys.c \
+        ${IMDS-800D}/cpu.c ${IMDS-800D}/front_panel.c \
+        ${IMDS-800D}/monitor.c ${IMDS-800C}/ieprom1.c \
+	${IMDS-800C}/i8251.c ${IMDS-800C}/ieprom.c \
+	${IMDS-800C}/m800multibus.c ${IMDS-800C}/isbc064.c \
+	${IMDS-800C}/isbc202.c ${IMDS-800C}/isbc201.c \
+	${IMDS-800C}/zx200a.c ${IMDS-800C}/isbc464.c \
+	${IMDS-800C}/isbc206.c ${IMDS-800C}/i3214.c
+IMDS-800_OPT = -I ${IMDS-800D}
+
+
+IMDS-810D = Intel-Systems/imds-810
+IMDS-810C = Intel-Systems/common
+IMDS-810 = ${IMDS-800C}/i8080.c ${IMDS-810D}/imds-810_sys.c \
+        ${IMDS-810D}/cpu.c ${IMDS-810D}/front_panel.c \
+        ${IMDS-810D}/monitor.c ${IMDS-810C}/ieprom1.c \
+	${IMDS-810C}/i8251.c ${IMDS-810C}/ieprom.c \
+	${IMDS-810C}/m800multibus.c ${IMDS-810C}/isbc064.c \
+	${IMDS-810C}/isbc202.c ${IMDS-810C}/isbc201.c \
+	${IMDS-810C}/zx200a.c ${IMDS-810C}/isbc464.c \
+	${IMDS-810C}/isbc206.c ${IMDS-800C}/i3214.c
+IMDS-810_OPT = -I ${IMDS-810D}
 
 
 IBMPCD = Intel-Systems/ibmpc
@@ -1866,6 +1973,61 @@ ifneq (,$(BESM6_BUILD))
     endif
 endif
 
+PDP6D = PDP10
+ifneq (,$(DISPLAY_OPT))
+  PDP6_DISPLAY_OPT = 
+endif
+PDP6 = ${PDP6D}/kx10_cpu.c ${PDP6D}/kx10_sys.c ${PDP6D}/kx10_cty.c \
+	${PDP6D}/kx10_lp.c ${PDP6D}/kx10_pt.c ${PDP6D}/kx10_cr.c \
+	${PDP6D}/kx10_cp.c ${PDP6D}/pdp6_dct.c ${PDP6D}/pdp6_dtc.c \
+	${PDP6D}/pdp6_mtc.c ${PDP6D}/pdp6_dsk.c ${PDP6D}/pdp6_dcs.c \
+	${PDP6D}/kx10_dpy.c ${DISPLAYL} $(DISPLAY340)
+PDP6_OPT = -DPDP6=1 -DUSE_INT64 -I $(PDP6D) -DUSE_SIM_CARD $(DISPLAY_OPT) $(PDP6_DISPLAY_OPT)
+
+KA10D = PDP10
+ifneq (,$(DISPLAY_OPT))
+  KA10_DISPLAY_OPT = 
+endif
+KA10 = ${KA10D}/kx10_cpu.c ${KA10D}/kx10_sys.c ${KA10D}/kx10_df.c \
+	${KA10D}/kx10_dp.c ${KA10D}/kx10_mt.c ${KA10D}/kx10_cty.c \
+	${KA10D}/kx10_lp.c ${KA10D}/kx10_pt.c ${KA10D}/kx10_dc.c \
+	${KA10D}/kx10_rp.c ${KA10D}/kx10_rc.c ${KA10D}/kx10_dt.c \
+	${KA10D}/kx10_dk.c ${KA10D}/kx10_cr.c ${KA10D}/kx10_cp.c \
+	${KA10D}/kx10_tu.c ${KA10D}/kx10_rs.c ${KA10D}/ka10_pd.c \
+	${KA10D}/kx10_imp.c ${KA10D}/ka10_tk10.c ${KA10D}/ka10_mty.c \
+	${KA10D}/ka10_imx.c ${KA10D}/ka10_ch10.c ${KA10D}/ka10_stk.c \
+	${KA10D}/ka10_ten11.c ${KA10D}/ka10_auxcpu.c $(KA10D)/ka10_pmp.c \
+	${KA10D}/ka10_dkb.c ${KA10D}/pdp6_dct.c ${KA10D}/pdp6_dtc.c \
+	${KA10D}/pdp6_mtc.c ${KA10D}/pdp6_dsk.c ${KA10D}/pdp6_dcs.c \
+	${KA10D}/ka10_dpk.c ${KA10D}/kx10_dpy.c  ${PDP10D}/ka10_ai.c \
+	${DISPLAYL} $(DISPLAY340)
+KA10_OPT = -DKA=1 -DUSE_INT64 -I $(KA10D) -DUSE_SIM_CARD ${NETWORK_OPT} $(DISPLAY_OPT) $(KA10_DISPLAY_OPT)
+ifneq ($(PANDA_LIGHTS),)
+# ONLY for Panda display.
+KA10_OPT += -DPANDA_LIGHTS
+KA10 += ${KA10D}/ka10_lights.c
+KA10_LDFLAGS += -lusb-1.0
+endif
+
+KI10D = PDP10
+ifneq (,$(DISPLAY_OPT))
+KI10_DISPLAY_OPT = 
+endif
+KI10 = ${KI10D}/kx10_cpu.c ${KI10D}/kx10_sys.c ${KI10D}/kx10_df.c \
+	${KI10D}/kx10_dp.c ${KI10D}/kx10_mt.c ${KI10D}/kx10_cty.c \
+	${KI10D}/kx10_lp.c ${KI10D}/kx10_pt.c ${KI10D}/kx10_dc.c  \
+	${KI10D}/kx10_rp.c ${KI10D}/kx10_rc.c ${KI10D}/kx10_dt.c \
+	${KI10D}/kx10_dk.c ${KI10D}/kx10_cr.c ${KI10D}/kx10_cp.c \
+	${KI10D}/kx10_tu.c ${KI10D}/kx10_rs.c ${KI10D}/kx10_imp.c \
+	${KI10D}/kx10_dpy.c ${DISPLAYL} $(DISPLAY340)
+KI10_OPT = -DKI=1 -DUSE_INT64 -I $(KI10D) -DUSE_SIM_CARD ${NETWORK_OPT} $(DISPLAY_OPT) $(KI10_DISPLAY_OPT)
+ifneq ($(PANDA_LIGHTS),)
+# ONLY for Panda display.
+KI10_OPT += -DPANDA_LIGHTS
+KI10 += ${KA10D}/ka10_lights.c
+KI10_LDFLAGS = -lusb-1.0
+endif
+
 ###
 ### Experimental simulators
 ###
@@ -1920,8 +2082,10 @@ ATT3B2 = ${ATT3B2D}/3b2_cpu.c ${ATT3B2D}/3b2_mmu.c \
 	${ATT3B2D}/3b2_id.c ${ATT3B2D}/3b2_dmac.c \
 	${ATT3B2D}/3b2_sys.c ${ATT3B2D}/3b2_io.c \
 	${ATT3B2D}/3b2_ports.c ${ATT3B2D}/3b2_ctc.c \
-	${ATT3B2D}/3b2_ni.c ${ATT3B2D}/3b2_sysdev.c
+	${ATT3B2D}/3b2_ni.c ${ATT3B2D}/3b2_mau.c \
+	${ATT3B2D}/3b2_sysdev.c
 ATT3B2_OPT = -DUSE_INT64 -DUSE_ADDR64 -I ${ATT3B2D} ${NETWORK_OPT}
+
 #
 # Build everything (not the unsupported/incomplete or experimental simulators)
 #
@@ -1934,8 +2098,9 @@ ALL = pdp1 pdp4 pdp7 pdp8 pdp9 pdp15 pdp11 pdp10 \
 	nova eclipse hp2100 hp3000 i1401 i1620 s3 altair altairz80 gri \
 	i7094 ibm1130 id16 id32 sds lgp h316 cdc1700 \
 	swtp6800mp-a swtp6800mp-a2 tx-0 ssem b5500 isys8010 isys8020 \
-	isys8030 isys8024 imds-225 scelbi 3b2 i701 i704 i7010 i7070 i7080 i7090 \
-	sigma uc15
+	isys8030 isys8024 imds-210 imds-220 imds-225 imds-230 imds-800 imds-810 \
+	scelbi 3b2 i701 i704 i7010 i7070 i7080 i7090 \
+	sigma uc15 pdp10-ka pdp10-ki pdp6
 
 all : ${ALL}
 
@@ -1954,11 +2119,10 @@ ${BUILD_ROMS} :
 	${MKDIRBIN}
 ifeq ($(WIN32),)
 	@if $(TEST) \( ! -e $@ \) -o \( sim_BuildROMs.c -nt $@ \) ; then ${CC} sim_BuildROMs.c $(CC_OUTSPEC); fi
-	@$@
 else
-	if not exist $@ ${CC} sim_BuildROMs.c $(CC_OUTSPEC)
-	$(@D)\$(@F)
+	@if not exist $@ ${CC} sim_BuildROMs.c $(CC_OUTSPEC)
 endif
+	@$@
 
 #
 # Individual builds
@@ -1983,9 +2147,9 @@ endif
 
 pdp7 : ${BIN}pdp7${EXE}
 
-${BIN}pdp7${EXE} : ${PDP18B} ${SIM}
+${BIN}pdp7${EXE} : ${PDP18B} ${PDP18BD}/pdp18b_dpy.c ${DISPLAYL} $(DISPLAY340) ${SIM}
 	${MKDIRBIN}
-	${CC} ${PDP18B} ${SIM} ${PDP7_OPT} $(CC_OUTSPEC) ${LDFLAGS}
+	${CC} ${PDP18B} ${PDP18BD}/pdp18b_dpy.c ${DISPLAYL} $(DISPLAY340) ${SIM} ${PDP7_OPT} $(CC_OUTSPEC) ${LDFLAGS}
 ifneq (,$(call find_test,${PDP18BD},pdp7))
 	$@ $(call find_test,${PDP18BD},pdp7) $(TEST_ARG)
 endif
@@ -2429,6 +2593,24 @@ ifneq (,$(call find_test,${ISYS8030D},isys8030))
 	$@ $(call find_test,${ISYS8030D},isys8030) $(TEST_ARG)
 endif
 
+imds-210: ${BIN}imds-210${EXE}
+
+${BIN}imds-210${EXE} : ${IMDS-210} ${SIM} ${BUILD_ROMS}
+	${MKDIRBIN}
+	${CC} ${IMDS-210} ${SIM} ${IMDS-210_OPT} $(CC_OUTSPEC) ${LDFLAGS}
+ifneq (,$(call find_test,${IMDS-210D},imds-210))
+	$@ $(call find_test,${IMDS-210D},imds-210) $(TEST_ARG)
+endif
+
+imds-220: ${BIN}imds-220${EXE}
+
+${BIN}imds-220${EXE} : ${IMDS-220} ${SIM} ${BUILD_ROMS}
+	${MKDIRBIN}
+	${CC} ${IMDS-220} ${SIM} ${IMDS-220_OPT} $(CC_OUTSPEC) ${LDFLAGS}
+ifneq (,$(call find_test,${IMDS-220D},imds-220))
+	$@ $(call find_test,${IMDS-220D},imds-220) $(TEST_ARG)
+endif
+
 imds-225: ${BIN}imds-225${EXE}
 
 ${BIN}imds-225${EXE} : ${IMDS-225} ${SIM} ${BUILD_ROMS}
@@ -2436,6 +2618,33 @@ ${BIN}imds-225${EXE} : ${IMDS-225} ${SIM} ${BUILD_ROMS}
 	${CC} ${IMDS-225} ${SIM} ${IMDS-225_OPT} $(CC_OUTSPEC) ${LDFLAGS}
 ifneq (,$(call find_test,${IMDS-225D},imds-225))
 	$@ $(call find_test,${IMDS-225D},imds-225) $(TEST_ARG)
+endif
+
+imds-230: ${BIN}imds-230${EXE}
+
+${BIN}imds-230${EXE} : ${IMDS-230} ${SIM} ${BUILD_ROMS}
+	${MKDIRBIN}
+	${CC} ${IMDS-230} ${SIM} ${IMDS-230_OPT} $(CC_OUTSPEC) ${LDFLAGS}
+ifneq (,$(call find_test,${IMDS-230D},imds-230))
+	$@ $(call find_test,${IMDS-230D},imds-230) $(TEST_ARG)
+endif
+
+imds-800: ${BIN}imds-800${EXE}
+
+${BIN}imds-800${EXE} : ${IMDS-800} ${SIM} ${BUILD_ROMS}
+	${MKDIRBIN}
+	${CC} ${IMDS-800} ${SIM} ${IMDS-800_OPT} $(CC_OUTSPEC) ${LDFLAGS}
+ifneq (,$(call find_test,${IMDS-800D},imds-800))
+	$@ $(call find_test,${IMDS-800D},imds-800) $(TEST_ARG)
+endif
+
+imds-810: ${BIN}imds-810${EXE}
+
+${BIN}imds-810${EXE} : ${IMDS-810} ${SIM} ${BUILD_ROMS}
+	${MKDIRBIN}
+	${CC} ${IMDS-810} ${SIM} ${IMDS-810_OPT} $(CC_OUTSPEC) ${LDFLAGS}
+ifneq (,$(call find_test,${IMDS-810D},imds-810))
+	$@ $(call find_test,${IMDS-810D},imds-810) $(TEST_ARG)
 endif
 
 ibmpc: ${BIN}ibmpc${EXE}
@@ -2621,6 +2830,34 @@ ${BIN}i650${EXE} : ${I650} ${SIM}
 ifneq (,$(call find_test,${I650D},i650))
 	$@ $(call find_test,${I650D},i650) $(TEST_ARG)
 endif
+
+pdp6 : ${BIN}pdp6${EXE}
+
+${BIN}pdp6${EXE} : ${PDP6} ${SIM}
+	${MKDIRBIN}
+	${CC} ${PDP6} ${PDP6_DPY} ${SIM} ${PDP6_OPT} $(CC_OUTSPEC) ${LDFLAGS} ${PDP6_LDFLAGS}
+ifneq (,$(call find_test,${PDP10D},pdp6))
+	$@ $(call find_test,${PDP10D},pdp6) $(TEST_ARG)
+endif
+
+pdp10-ka : ${BIN}pdp10-ka${EXE}
+
+${BIN}pdp10-ka${EXE} : ${KA10} ${SIM}
+	${MKDIRBIN}
+	${CC} ${KA10} ${KA10_DPY} ${SIM} ${KA10_OPT} $(CC_OUTSPEC) ${LDFLAGS} ${KA10_LDFLAGS}
+ifneq (,$(call find_test,${PDP10D},ka10))
+	$@ $(call find_test,${PDP10D},ka10) $(TEST_ARG)
+endif
+
+pdp10-ki : ${BIN}pdp10-ki${EXE}
+
+${BIN}pdp10-ki${EXE} : ${KI10} ${SIM}
+	${MKDIRBIN}
+	${CC} ${KI10} ${KI10_DPY} ${SIM} ${KI10_OPT} $(CC_OUTSPEC) ${LDFLAGS} ${KI10_LDFLAGS}
+ifneq (,$(call find_test,${PDP10D},ki10))
+	$@ $(call find_test,${PDP10D},ki10) $(TEST_ARG)
+endif
+
 
 # Front Panel API Demo/Test program
 
